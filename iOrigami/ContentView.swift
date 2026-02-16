@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var engine = OrigamiEngine()
+    @StateObject private var origamiModel = OrigamiEngine()
 
     // UI State for drawing the crease line
     @State private var dragStart: CGPoint? = nil
@@ -10,7 +10,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             // 1. The 3D Paper
-            SceneKitView(engine: engine, dragStart: $dragStart, dragEnd: $dragEnd)
+            SceneKitView(engine: origamiModel, dragStart: $dragStart, dragEnd: $dragEnd)
                 .background(Color.gray.opacity(0.1))
                 .edgesIgnoringSafeArea(.all)
 
@@ -39,7 +39,7 @@ struct ContentView: View {
             }
 
             // 2.5 Particles
-            ParticleOverlay(triggerFold: engine.foldCount, triggerPuff: engine.isPuffed)
+            ParticleOverlay(triggerFold: origamiModel.foldCount, triggerPuff: origamiModel.isPuffed)
 
             // 3. UI Overlay
             VStack {
@@ -48,7 +48,7 @@ struct ContentView: View {
                         Text("iOrigami")
                             .font(.system(.largeTitle, design: .rounded))
                             .fontWeight(.black)
-                        Text("\(engine.foldCount) Folds Made")
+                        Text("\(origamiModel.foldCount) Folds Made")
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundColor(.secondary)
@@ -62,23 +62,23 @@ struct ContentView: View {
 
                 HStack(spacing: 30) {
                     // Puff Button
-                    Button(action: { engine.applyPuff() }) {
+                    Button(action: { origamiModel.applyPuff() }) {
                         VStack {
-                            Image(systemName: engine.isPuffed ? "wind.snow" : "wind")
+                            Image(systemName: origamiModel.isPuffed ? "wind.snow" : "wind")
                                 .font(.title)
-                            Text(engine.isPuffed ? "Flatten" : "Puff Up")
+                            Text(origamiModel.isPuffed ? "Flatten" : "Puff Up")
                                 .font(.caption).bold()
                         }
                         .frame(width: 80, height: 80)
-                        .background(engine.isPuffed ? Color.blue : Color.white)
-                        .foregroundColor(engine.isPuffed ? .white : .blue)
+                        .background(origamiModel.isPuffed ? Color.blue : Color.white)
+                        .foregroundColor(origamiModel.isPuffed ? .white : .blue)
                         .clipShape(Circle())
                         .shadow(radius: 5)
                     }
 
                     // Reset Button
                     Button(action: {
-                        engine.reset()
+                        origamiModel.reset()
                     }) {
                         VStack {
                             Image(systemName: "arrow.counterclockwise")
