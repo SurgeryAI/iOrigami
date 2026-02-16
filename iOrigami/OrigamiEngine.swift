@@ -9,95 +9,90 @@ class OrigamiEngine: ObservableObject {
     // Scene Essentials
     var scene = SCNScene()
     var paperNode: SCNNode?
-    var cameraOrbitNode = SCNNode() // The "pivot" for camera rotation
+    var cameraOrbitNode = SCNNode() // The pivot for 2-finger rotation
     
-    // Geometry Data
-    var vertices: [SCNVector3] = []
-    private var animationTimer: Timer?
+    // Geometry Constants
     private let segments = 40
     private let paperSize: Float = 10.0
+    var vertices: [SCNVector3] = []
+    private var animationTimer: Timer?
     
     init() {
         setupScene()
     }
     
-    // MARK: - Setup
+    // MARK: - Scene Setup
     func setupScene() {
-        // 1. Completely clear the scene root
-        scene.rootNode.enumerateChildNodes { (node, _) in
-            node.removeFromParentNode()
-        }
-        
-        // 2. IMPORTANT: Reset the local variable to nil so updateGeometry knows to recreate it
+        scene.rootNode.enumerateChildNodes { (node, _) in node.removeFromParentNode() }
         paperNode = nil
-        
-        // 3. Reset the published states
         foldCount = 0
         isPuffed = false
         
-        // 4. Re-setup Camera Pivot
+        // 1. Environment Lighting (Image-Based Lighting)
+        // This gives the paper realistic "studio" reflections
+        scene.lightingEnvironment.contents = "studio_lighting" // Uses system default or a provided HDR
+        scene.lightingEnvironment.intensity = 1.2
+        
+        // 2. Camera & Orbit Pivot
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
+        cameraNode.camera?.zNear = 0.1
         cameraNode.position = SCNVector3(0, 0, 20)
+        
         cameraOrbitNode = SCNNode()
         cameraOrbitNode.addChildNode(cameraNode)
         cameraOrbitNode.eulerAngles = SCNVector3(-Float.pi/4, 0, 0)
         scene.rootNode.addChildNode(cameraOrbitNode)
         
-        // 5. Re-setup Floor for shadows
+        // 3. Shadow-Casting Floor
         let floor = SCNFloor()
         floor.reflectivity = 0.05
-        // Inside setupScene()
-        let floorNode = SCNNode(geometry: SCNFloor())
-        floorNode.position.y = -0.5 // Lower the table slightly so the "back puff" has room
+        let floorNode = SCNNode(geometry: floor)
+        floorNode.position.y = -2.0 // Lowered so "back-puffing" doesn't clip
+        floorNode.geometry?.firstMaterial?.diffuse.contents = UIColor.systemGray6
         scene.rootNode.addChildNode(floorNode)
         
-        // 6. Restore lights and paper
         addLights()
         createPaper()
     }
-
+    
+    private func addLights() {
+        // Main Soft Spotlight for Shadows
+        let spot = SCNLight()
+        spot.type = .spot
+        spot.castsShadow = true
+        spot.shadowRadius = 10.0
+        spot.shadowColor = UIColor(white: 0, alpha: 0.3)
+        spot.intensity = 1200
+        
+        let lightNode = SCNNode()
+        lightNode.light = spot
+        lightNode.position = SCNVector3(10, 25, 10)
+        lightNode.constraints = [SCNLookAtConstraint(target: scene.rootNode)]
+        scene.rootNode.addChildNode(lightNode)
+        
+        // Soft Ambient Fill
+        let ambient = SCNLight()
+        ambient.type = .ambient
+        ambient.intensity = 300
+        let ambientNode = SCNNode()
+        ambientNode.light = ambient
+        scene.rootNode.addChildNode(ambientNode)
+    }
+    
+    // MARK: - Paper Creation
     private func createPaper() {
         vertices.removeAll()
         for y in 0...segments {
             for x in 0...segments {
                 let vx = (Float(x) / Float(segments) - 0.5) * paperSize
                 let vy = (Float(y) / Float(segments) - 0.5) * paperSize
-                // Always start at Z=0 for a fresh sheet
                 vertices.append(SCNVector3(vx, vy, 0))
             }
         }
-        // This will now correctly see that paperNode is nil and add it back to the scene
         updateGeometry()
     }
     
-    private func addLights() {
-        // Main Light with Soft Shadows
-        let spotLight = SCNLight()
-        spotLight.type = .spot
-        spotLight.castsShadow = true
-        spotLight.shadowRadius = 8.0
-        spotLight.shadowSampleCount = 16
-        spotLight.shadowColor = UIColor(white: 0, alpha: 0.3)
-        spotLight.intensity = 1500
-        
-        let lightNode = SCNNode()
-        lightNode.light = spotLight
-        lightNode.position = SCNVector3(x: 10, y: 30, z: 15) // Higher and slightly to the side
-        lightNode.constraints = [SCNLookAtConstraint(target: scene.rootNode)]
-        scene.rootNode.addChildNode(lightNode)
-        
-        // Ambient fill
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 400
-        let aNode = SCNNode()
-        aNode.light = ambient
-        scene.rootNode.addChildNode(aNode)
-    }
-    
-       
-    // MARK: - Geometry Engine
     func updateGeometry() {
         var triangleIndices: [Int32] = []
         var lineIndices: [Int32] = []
@@ -111,7 +106,6 @@ class OrigamiEngine: ObservableObject {
                 
                 triangleIndices.append(contentsOf: [i, nextX, nextY])
                 triangleIndices.append(contentsOf: [nextX, nextXY, nextY])
-                
                 lineIndices.append(contentsOf: [i, nextX, i, nextY])
             }
         }
@@ -122,27 +116,21 @@ class OrigamiEngine: ObservableObject {
         
         let geometry = SCNGeometry(sources: [source], elements: [faceElement, lineElement])
         
+        // Physically Based Paper Material
         let paperMat = SCNMaterial()
         paperMat.diffuse.contents = UIColor.white
         paperMat.lightingModel = .physicallyBased
-
-        // 'Roughness' helps show the "stretch" in the inflated areas
         paperMat.roughness.contents = 0.4
-        paperMat.metalness.contents = 0.0 // Keep it feeling like paper fibers
-
-        // This ensures that as the pockets puff toward the camera,
-        // the edges get a slightly darker "rim" shadow.
-        paperMat.fresnelExponent = 1.5
+        paperMat.isDoubleSided = true
         
         let creaseMat = SCNMaterial()
-        creaseMat.diffuse.contents = UIColor.systemGray2
+        creaseMat.diffuse.contents = UIColor.systemGray3
         creaseMat.lightingModel = .constant
         
         geometry.materials = [paperMat, creaseMat]
         
         if paperNode == nil {
             paperNode = SCNNode(geometry: geometry)
-            paperNode?.position.y = 0.05 // Lift for shadow room
             paperNode?.eulerAngles.x = -.pi / 2
             scene.rootNode.addChildNode(paperNode!)
         } else {
@@ -155,48 +143,44 @@ class OrigamiEngine: ObservableObject {
         let hitStart = view.hitTest(from, options: nil).first
         let hitEnd = view.hitTest(to, options: nil).first
         
-        guard let startPoint = hitStart?.localCoordinates,
-              let endPoint = hitEnd?.localCoordinates else { return }
+        guard let start = hitStart?.localCoordinates, let end = hitEnd?.localCoordinates else { return }
         
-        let dx = endPoint.x - startPoint.x
-        let dy = endPoint.y - startPoint.y
+        let dx = end.x - start.x
+        let dy = end.y - start.y
         let normal = SCNVector3(-dy, dx, 0)
         
         var targetVertices = self.vertices
         var movedCount = 0
         
-        // 1. Transformation (The Fold)
         for i in 0..<targetVertices.count {
             let v = targetVertices[i]
-            let toVertexX = v.x - startPoint.x
-            let toVertexY = v.y - startPoint.y
-            let dot = toVertexX * normal.x + toVertexY * normal.y
+            let toV = SCNVector3(v.x - start.x, v.y - start.y, 0)
+            let dot = toV.x * normal.x + toV.y * normal.y
             
             if dot > 0 {
-                let lengthSq = normal.x * normal.x + normal.y * normal.y
-                let projection = dot / lengthSq
+                let lenSq = normal.x * normal.x + normal.y * normal.y
+                let projection = dot / lenSq
                 targetVertices[i].x -= 2 * projection * normal.x
                 targetVertices[i].y -= 2 * projection * normal.y
-                targetVertices[i].z += 0.2 // Stack layer height
+                targetVertices[i].z += 0.25 // Incremental stacking
                 movedCount += 1
             }
         }
         
-        // 2. Centering Logic
+        // Centering Pass (Bounding Box)
         let allX = targetVertices.map { $0.x }
         let allY = targetVertices.map { $0.y }
-        if let minX = allX.min(), let maxX = allX.max(),
-           let minY = allY.min(), let maxY = allY.max() {
-            let offsetX = (minX + maxX) / 2.0
-            let offsetY = (minY + maxY) / 2.0
+        if let minX = allX.min(), let maxX = allX.max(), let minY = allY.min(), let maxY = allY.max() {
+            let cx = (minX + maxX) / 2.0
+            let cy = (minY + maxY) / 2.0
             for i in 0..<targetVertices.count {
-                targetVertices[i].x -= offsetX
-                targetVertices[i].y -= offsetY
+                targetVertices[i].x -= cx
+                targetVertices[i].y -= cy
             }
         }
         
         if movedCount > 0 {
-            animateTo(targets: targetVertices)
+            animateTo(targets: targetVertices, duration: 0.4)
             foldCount += 1
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
@@ -204,61 +188,34 @@ class OrigamiEngine: ObservableObject {
     
     func applyPuff() {
         isPuffed.toggle()
-        
         var targetVertices = vertices
         
-        // 1. Find the Median Z (The "Air Pocket" center)
         let allZ = vertices.map { $0.z }
-        let minZ = allZ.min() ?? 0
-        let maxZ = allZ.max() ?? 0
-        let medianZ = (minZ + maxZ) / 2.0
-        
-        // 2. Inflation Power
-        let power: Float = isPuffed ? 1.4 : 0.0
+        let medianZ = ((allZ.min() ?? 0) + (allZ.max() ?? 0)) / 2.0
+        let power: Float = isPuffed ? 1.6 : 0.0
         
         for i in 0..<targetVertices.count {
             let v = targetVertices[i]
-            
-            // 3. Determine Direction
-            // If the vertex is above the middle, direction is 1 (Up)
-            // If below the middle, direction is -1 (Down)
             let direction: Float = v.z >= medianZ ? 1.0 : -1.0
+            let pocketShape = abs(sin(v.x * 0.7) * cos(v.y * 0.7))
+            let expansion = pocketShape * power * (abs(v.z - medianZ) + 0.5)
             
-            // 4. Calculate Distance from the "Core"
-            // This ensures the middle layers move less than the outer layers
-            let distanceFromCore = abs(v.z - medianZ)
-            
-            // 5. The "Blowing Air" Math
-            // We use a sine wave to create the 'bowing' of the facets,
-            // and multiply by the direction so front and back puff away from each other.
-            let pocketShape = sin(v.x * 0.7) * cos(v.y * 0.7)
-            let expansion = abs(pocketShape) * power * (distanceFromCore + 0.5)
-            
-            // 6. Apply Movement
-            // We push the vertex in its specific direction (forward or backward)
             targetVertices[i].z += (expansion * direction)
         }
         
-        // Animate with a "breath-like" curve
         animateTo(targets: targetVertices, duration: 0.7)
-        
-        // Give the user a "hollow" sounding haptic
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
     
     func rotateCamera(dx: Float, dy: Float) {
         cameraOrbitNode.eulerAngles.y -= dx
         cameraOrbitNode.eulerAngles.x -= dy
-        
-        // Vertical clamping
         let limit = Float.pi / 2.2
-        if cameraOrbitNode.eulerAngles.x > limit { cameraOrbitNode.eulerAngles.x = limit }
-        if cameraOrbitNode.eulerAngles.x < -limit { cameraOrbitNode.eulerAngles.x = -limit }
+        cameraOrbitNode.eulerAngles.x = max(-limit, min(limit, cameraOrbitNode.eulerAngles.x))
     }
     
     // MARK: - Animation Engine
-    private func animateTo(targets: [SCNVector3], duration: TimeInterval = 0.25) {
+    private func animateTo(targets: [SCNVector3], duration: TimeInterval) {
         var step: Double = 0
         let frameRate: Double = 60.0
         let totalSteps = duration * frameRate
@@ -267,10 +224,8 @@ class OrigamiEngine: ObservableObject {
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1/frameRate, repeats: true) { timer in
             step += 1
-            let t = CGFloat(step / totalSteps)
-            
-            // Using a "Cubic Out" easing for a smoother, more organic arrival
-            let easedT = Float(1 - pow(1 - t, 3))
+            let t = step / totalSteps
+            let easedT = Float(t * (2 - t)) // Ease Out
             
             for i in 0..<self.vertices.count {
                 self.vertices[i].x = startPositions[i].x + (targets[i].x - startPositions[i].x) * easedT
@@ -279,10 +234,7 @@ class OrigamiEngine: ObservableObject {
             }
             
             self.updateGeometry()
-            
-            if step >= totalSteps {
-                timer.invalidate()
-            }
+            if step >= totalSteps { timer.invalidate() }
         }
     }
 }
