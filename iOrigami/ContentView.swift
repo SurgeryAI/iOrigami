@@ -67,7 +67,10 @@ struct ContentView: View {
                     }
                     
                     // Reset Button
-                    Button(action: { engine.setupScene() }) {
+                    Button(action: { withAnimation(.spring()) {
+                        engine.setupScene()
+                    }
+                    }) {
                         VStack {
                             Image(systemName: "arrow.counterclockwise")
                                 .font(.title)
