@@ -79,7 +79,7 @@ struct ContentView: View {
                     // Reset Button
                     Button(action: {
                         withAnimation(.spring()) {
-                            engine.setupScene()
+                            engine.reset()
                         }
                     }) {
                         VStack {

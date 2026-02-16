@@ -21,6 +21,9 @@ class OrigamiEngine: ObservableObject {
     private var targetVertices: [SCNVector3] = []
     private var velocities: [SCNVector3] = []
 
+    // Camera Node Reference
+    var cameraNode: SCNNode?
+
     // Physics Constants
     private let springStiffness: Float = 150.0
     private let springDamping: Float = 12.0
@@ -37,24 +40,23 @@ class OrigamiEngine: ObservableObject {
 
     // MARK: - Scene Setup
     func setupScene() {
-        scene.rootNode.enumerateChildNodes { (node, _) in node.removeFromParentNode() }
-        paperNode = nil
-        foldCount = 0
-        isPuffed = false
+        // Only setup if empty
+        guard scene.rootNode.childNodes.isEmpty else { return }
 
-        // 1. Environment Lighting (Image-Based Lighting)
-        // This gives the paper realistic "studio" reflections
-        scene.lightingEnvironment.contents = "studio_lighting"  // Uses system default or a provided HDR
+        // 1. Environment Lighting
+        scene.lightingEnvironment.contents = "studio_lighting"
         scene.lightingEnvironment.intensity = 1.2
 
         // 2. Camera & Orbit Pivot
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        cameraNode.camera?.zNear = 0.1
-        cameraNode.position = SCNVector3(0, 0, 20)
+        cameraNode = SCNNode()
+        cameraNode?.camera = SCNCamera()
+        cameraNode?.camera?.zNear = 0.1
+        cameraNode?.position = SCNVector3(0, 0, 20)
 
         cameraOrbitNode = SCNNode()
-        cameraOrbitNode.addChildNode(cameraNode)
+        if let cam = cameraNode {
+            cameraOrbitNode.addChildNode(cam)
+        }
         cameraOrbitNode.eulerAngles = SCNVector3(-Float.pi / 4, 0, 0)
         scene.rootNode.addChildNode(cameraOrbitNode)
 
@@ -62,11 +64,24 @@ class OrigamiEngine: ObservableObject {
         let floor = SCNFloor()
         floor.reflectivity = 0.05
         let floorNode = SCNNode(geometry: floor)
-        floorNode.position.y = -2.0  // Lowered so "back-puffing" doesn't clip
+        floorNode.position.y = -2.0
         floorNode.geometry?.firstMaterial?.diffuse.contents = UIColor.systemGray6
         scene.rootNode.addChildNode(floorNode)
 
         addLights()
+        reset()
+    }
+
+    func reset() {
+        foldCount = 0
+        isPuffed = false
+
+        // Reset Camera
+        withAnimation(.spring()) {
+            cameraOrbitNode.eulerAngles = SCNVector3(-Float.pi / 4, 0, 0)
+        }
+
+        // Reset Paper
         createPaper()
     }
 
