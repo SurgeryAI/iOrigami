@@ -78,9 +78,7 @@ struct ContentView: View {
 
                     // Reset Button
                     Button(action: {
-                        withAnimation(.spring()) {
-                            engine.reset()
-                        }
+                        engine.reset()
                     }) {
                         VStack {
                             Image(systemName: "arrow.counterclockwise")
