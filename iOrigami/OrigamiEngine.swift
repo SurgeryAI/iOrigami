@@ -272,7 +272,7 @@ class OrigamiEngine: ObservableObject {
                 // Instead of adding arbitrary Z, we multiply the distance from the center plane.
                 // This keeps layers connected where they meet (z-diff is small) and separates them where they don't.
                 let zDiff = currentTarget.z - medianZ
-                let separationFactor: Float = 3.5 * breathing
+                let separationFactor: Float = 1.2 * breathing  // Reduced from 3.5 to keep creases tight
                 let separationOffset = zDiff * separationFactor
 
                 // B. Pneumatic Bulge
