@@ -15,10 +15,24 @@ class OrigamiEngine: ObservableObject {
     private let segments = 40
     private let paperSize: Float = 10.0
     var vertices: [SCNVector3] = []
-    private var animationTimer: Timer?
+    
+    // Spring Animation State
+    private var displayLink: CADisplayLink?
+    private var targetVertices: [SCNVector3] = []
+    private var velocities: [SCNVector3] = []
+    
+    // Physics Constants
+    private let springStiffness: Float = 150.0
+    private let springDamping: Float = 12.0
+    private let mass: Float = 1.0
     
     init() {
         setupScene()
+        startLoop()
+    }
+    
+    deinit {
+        stopLoop()
     }
     
     // MARK: - Scene Setup
@@ -83,11 +97,17 @@ class OrigamiEngine: ObservableObject {
     // MARK: - Paper Creation
     private func createPaper() {
         vertices.removeAll()
+        targetVertices.removeAll()
+        velocities.removeAll()
+        
         for y in 0...segments {
             for x in 0...segments {
                 let vx = (Float(x) / Float(segments) - 0.5) * paperSize
                 let vy = (Float(y) / Float(segments) - 0.5) * paperSize
-                vertices.append(SCNVector3(vx, vy, 0))
+                let v = SCNVector3(vx, vy, 0)
+                vertices.append(v)
+                targetVertices.append(v)
+                velocities.append(SCNVector3(0, 0, 0))
             }
         }
         updateGeometry()
@@ -149,11 +169,10 @@ class OrigamiEngine: ObservableObject {
         let dy = end.y - start.y
         let normal = SCNVector3(-dy, dx, 0)
         
-        var targetVertices = self.vertices
         var movedCount = 0
         
         for i in 0..<targetVertices.count {
-            let v = targetVertices[i]
+            let v = targetVertices[i] // Use targetVertices as the source of truth for "flat" state before puff
             let toV = SCNVector3(v.x - start.x, v.y - start.y, 0)
             let dot = toV.x * normal.x + toV.y * normal.y
             
@@ -180,7 +199,6 @@ class OrigamiEngine: ObservableObject {
         }
         
         if movedCount > 0 {
-            animateTo(targets: targetVertices, duration: 0.4)
             foldCount += 1
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
@@ -188,23 +206,10 @@ class OrigamiEngine: ObservableObject {
     
     func applyPuff() {
         isPuffed.toggle()
-        var targetVertices = vertices
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         
-        let allZ = vertices.map { $0.z }
-        let medianZ = ((allZ.min() ?? 0) + (allZ.max() ?? 0)) / 2.0
-        let power: Float = isPuffed ? 1.6 : 0.0
-        
-        for i in 0..<targetVertices.count {
-            let v = targetVertices[i]
-            let direction: Float = v.z >= medianZ ? 1.0 : -1.0
-            let pocketShape = abs(sin(v.x * 0.7) * cos(v.y * 0.7))
-            let expansion = pocketShape * power * (abs(v.z - medianZ) + 0.5)
-            
-            targetVertices[i].z += (expansion * direction)
-        }
-        
-        animateTo(targets: targetVertices, duration: 0.7)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // We handle puffing logic in the physics loop to allow for continuous "breathing" and dynamic expansion
+        // Logic moved to updatePhysics()
     }
     
     func rotateCamera(dx: Float, dy: Float) {
@@ -215,26 +220,65 @@ class OrigamiEngine: ObservableObject {
     }
     
     // MARK: - Animation Engine
-    private func animateTo(targets: [SCNVector3], duration: TimeInterval) {
-        var step: Double = 0
-        let frameRate: Double = 60.0
-        let totalSteps = duration * frameRate
-        let startPositions = self.vertices
+    // MARK: - Physics Engine
+    private func startLoop() {
+        displayLink = CADisplayLink(target: self, selector: #selector(updatePhysics))
+        displayLink?.add(to: .main, forMode: .common)
+    }
+    
+    private func stopLoop() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+    
+    @objc private func updatePhysics() {
+        let dt: Float = 1.0 / 60.0
         
-        animationTimer?.invalidate()
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 1/frameRate, repeats: true) { timer in
-            step += 1
-            let t = step / totalSteps
-            let easedT = Float(t * (2 - t)) // Ease Out
+        // Breathing Animation Time
+        let time = Float(CACurrentMediaTime())
+        let breathing = isPuffed ? (1.0 + 0.1 * sin(time * 3.0)) : 1.0
+        
+        for i in 0..<vertices.count {
+            // 1. Calculate Target Position (Folded State + Puff Offset)
+            var currentTarget = targetVertices[i]
             
-            for i in 0..<self.vertices.count {
-                self.vertices[i].x = startPositions[i].x + (targets[i].x - startPositions[i].x) * easedT
-                self.vertices[i].y = startPositions[i].y + (targets[i].y - startPositions[i].y) * easedT
-                self.vertices[i].z = startPositions[i].z + (targets[i].z - startPositions[i].z) * easedT
+            if isPuffed {
+                // Organic Puff Logic
+                // Expand based on distance from center, but respect fold lines
+                let dist = sqrt(currentTarget.x * currentTarget.x + currentTarget.y * currentTarget.y)
+                let maxDist = paperSize * 0.7
+                let falloff = max(0, (maxDist - dist) / maxDist)
+                
+                // Direction aligns with vertex normal/up
+                let puffStrength: Float = 2.0 * falloff * breathing
+                
+                // Simple assumption: Z-up expansion based on original Z layering
+                // We expand "outwards" from the center of the paper mass z-wise
+                let zDirection: Float = currentTarget.z > 0.1 ? 1.0 : (currentTarget.z < -0.1 ? -1.0 : 0.5)
+                
+                currentTarget.z += puffStrength * zDirection
+                currentTarget.x *= (1.0 + 0.05 * falloff * breathing) // Slight XY expansion
+                currentTarget.y *= (1.0 + 0.05 * falloff * breathing)
             }
             
-            self.updateGeometry()
-            if step >= totalSteps { timer.invalidate() }
+            // 2. Spring Simulation
+            let forceX = (currentTarget.x - vertices[i].x) * springStiffness
+            let forceY = (currentTarget.y - vertices[i].y) * springStiffness
+            let forceZ = (currentTarget.z - vertices[i].z) * springStiffness
+            
+            let accelX = forceX / mass
+            let accelY = forceY / mass
+            let accelZ = forceZ / mass
+            
+            velocities[i].x = (velocities[i].x + accelX * dt) * (1.0 - springDamping * dt)
+            velocities[i].y = (velocities[i].y + accelY * dt) * (1.0 - springDamping * dt)
+            velocities[i].z = (velocities[i].z + accelZ * dt) * (1.0 - springDamping * dt)
+            
+            vertices[i].x += velocities[i].x * dt
+            vertices[i].y += velocities[i].y * dt
+            vertices[i].z += velocities[i].z * dt
         }
+        
+        updateGeometry()
     }
 }
